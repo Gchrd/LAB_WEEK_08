@@ -18,6 +18,7 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import com.example.lab_week_08.worker.FirstWorker
 import com.example.lab_week_08.worker.SecondWorker
+import com.example.lab_week_08.worker.ThirdWorker
 
 class MainActivity : AppCompatActivity() {
 
@@ -65,9 +66,16 @@ class MainActivity : AppCompatActivity() {
             .setInputData(getIdInputData(SecondWorker.INPUT_DATA_ID, id))
             .build()
 
-        // Rantai eksekusi: First → Second
+        // === NEW: Request untuk ThirdWorker ===
+        val thirdRequest = OneTimeWorkRequest.Builder(ThirdWorker::class.java)
+            .setConstraints(networkConstraints)
+            .setInputData(getIdInputData(ThirdWorker.INPUT_DATA_ID, id))
+            .build()
+
+        // === Rantai eksekusi: First → Second → Third ===
         workManager.beginWith(firstRequest)
             .then(secondRequest)
+            .then(thirdRequest)
             .enqueue()
 
         // Observasi hasil FirstWorker
@@ -78,12 +86,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-        // Observasi hasil SecondWorker → panggil NotificationService
+        // Observasi hasil SecondWorker → panggil NotificationService (yang pertama)
         workManager.getWorkInfoByIdLiveData(secondRequest.id)
             .observe(this) { info ->
                 if (info?.state?.isFinished == true) {
                     showResult("Second process is done")
-                    launchNotificationService() // ← panggil service di sini
+                    launchNotificationService() // Service pertama
+                }
+            }
+
+        // === NEW: Observasi hasil ThirdWorker → panggil SecondNotificationService ===
+        workManager.getWorkInfoByIdLiveData(thirdRequest.id)
+            .observe(this) { info ->
+                if (info?.state?.isFinished == true) {
+                    showResult("Third process is done")
+                    launchSecondNotificationService() // Service kedua
                 }
             }
     }
@@ -99,7 +116,7 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    // === Panggil NotificationService (Foreground Service) ===
+    // === Panggil NotificationService (Foreground Service pertama) ===
     private fun launchNotificationService() {
         // Observasi callback penyelesaian dari service
         NotificationService.trackingCompletion.observe(this) { id ->
@@ -111,5 +128,19 @@ class MainActivity : AppCompatActivity() {
             putExtra(NotificationService.EXTRA_ID, "001")
         }
         ContextCompat.startForegroundService(this, serviceIntent)
+    }
+
+    // === NEW: Panggil SecondNotificationService (Foreground Service kedua) ===
+    private fun launchSecondNotificationService() {
+        // Observasi callback penyelesaian dari service kedua
+        SecondNotificationService.trackingCompletion.observe(this) { id ->
+            showResult("Process for Second Channel ID $id is done!")
+        }
+
+        // Start Foreground Service kedua
+        val intent = Intent(this, SecondNotificationService::class.java).apply {
+            putExtra(SecondNotificationService.EXTRA_ID, "002")
+        }
+        ContextCompat.startForegroundService(this, intent)
     }
 }
