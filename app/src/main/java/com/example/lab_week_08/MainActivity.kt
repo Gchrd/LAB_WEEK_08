@@ -1,9 +1,14 @@
 package com.example.lab_week_08
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.work.Constraints
@@ -13,10 +18,10 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import com.example.lab_week_08.worker.FirstWorker
 import com.example.lab_week_08.worker.SecondWorker
-w
+
 class MainActivity : AppCompatActivity() {
 
-    // Aman untuk Activity: inisialisasi WorkManager secara lazy (hindari 'this' sebelum onCreate)
+    // Inisialisasi WorkManager (lazy agar aman sebelum onCreate)
     private val workManager by lazy { WorkManager.getInstance(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,7 +34,19 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        // Constraint: butuh koneksi internet
+        // === Android 13+: Minta izin notifikasi ===
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    /* requestCode = */ 1
+                )
+            }
+        }
+
+        // Constraint (contoh: butuh koneksi internet)
         val networkConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -53,7 +70,7 @@ class MainActivity : AppCompatActivity() {
             .then(secondRequest)
             .enqueue()
 
-        // Observasi hasil (LiveData)
+        // Observasi hasil FirstWorker
         workManager.getWorkInfoByIdLiveData(firstRequest.id)
             .observe(this) { info ->
                 if (info?.state?.isFinished == true) {
@@ -61,23 +78,38 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+        // Observasi hasil SecondWorker → panggil NotificationService
         workManager.getWorkInfoByIdLiveData(secondRequest.id)
             .observe(this) { info ->
                 if (info?.state?.isFinished == true) {
                     showResult("Second process is done")
-                    // Nanti: di Bagian C kita panggil launchNotificationService() di sini
+                    launchNotificationService() // ← panggil service di sini
                 }
             }
     }
 
-    // Helper: siapkan Data input
+    // === Helper: siapkan Data input ===
     private fun getIdInputData(idKey: String, idValue: String): Data =
         Data.Builder()
             .putString(idKey, idValue)
             .build()
 
-    // Helper: tampilkan Toast
+    // === Helper: Toast singkat ===
     private fun showResult(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    // === Panggil NotificationService (Foreground Service) ===
+    private fun launchNotificationService() {
+        // Observasi callback penyelesaian dari service
+        NotificationService.trackingCompletion.observe(this) { id ->
+            showResult("Process for Notification Channel ID $id is done!")
+        }
+
+        // Start Foreground Service
+        val serviceIntent = Intent(this, NotificationService::class.java).apply {
+            putExtra(NotificationService.EXTRA_ID, "001")
+        }
+        ContextCompat.startForegroundService(this, serviceIntent)
     }
 }
